@@ -1,0 +1,7 @@
+{
+  "name": "executor_skill",
+  "description": "Agente Executor: ingesta datos MEF 2025, ejecuta OCR del archivo 1964 (>=15 paginas) y genera el draft del dashboard Streamlit. Periodo dinamico via CLI.",
+  "version": "0.1.0",
+  "status": "scaffold",
+  "_todo": "Etapa 5 (feature/claude-skills): definir prompts, tools e inputs (period)."
+}
