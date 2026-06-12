@@ -10,15 +10,17 @@ streamlit>=1.30.0
 
 # --- Procesamiento de datos (regla anti-flooding: filtrado local) ---
 pandas>=2.0.0
-numpy>=1.24.0
+numpy>=1.24,<2          # paddle 2.x y opencv requieren numpy 1.x
 
 # --- Acceso al portal datosabiertos.gob.pe ---
 requests>=2.31.0
 
 # --- OCR del archivo historico 1964 ---
-paddleocr>=2.7.0
-paddlepaddle>=2.6.0
-pdf2image>=1.17.0
+# IMPORTANTE: usar la serie 2.x (la 3.x arrastra paddlex/modelscope/torch).
+paddleocr>=2.7,<3
+paddlepaddle>=2.6,<3     # CPU. Para GPU (CUDA 12): paddlepaddle-gpu==2.6.1.post120
+                         #   + nvidia-cudnn-cu12==8.9.7.29 (ver README)
+PyMuPDF>=1.24.0          # render de paginas PDF -> imagen (sin poppler, ideal en Windows)
 Pillow>=10.0.0
 
 # --- Visualizaciones (graficos, mapas, heatmaps) ---
