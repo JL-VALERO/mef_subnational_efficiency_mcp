@@ -70,7 +70,29 @@ pip install -r requirements.txt
 
 ---
 
-## Uso
+## Servidor MCP local
+
+El portal `datosabiertos.gob.pe` corre sobre **DKAN** (API estilo CKAN, sin
+autenticación). El servidor MCP expone tools seguras que devuelven únicamente
+catálogos reducidos y snapshots de pocas filas (regla anti-flooding):
+
+| Tool | Qué hace |
+|---|---|
+| `health_check` | Verifica que el servidor está vivo. |
+| `search_datasets(query, limit)` | Busca datasets por palabra clave (tolerante a acentos). |
+| `get_dataset_info(dataset_id)` | Metadatos + recursos (id, formato, URL, datastore). |
+| `preview_resource(resource_id, rows)` | Muestra filas de un recurso del datastore (máx 10). |
+| `preview_csv(url, rows)` | Muestra las primeras filas de un CSV remoto sin descargarlo entero. |
+
+Ejecutar el servidor (stdio):
+
+```bash
+python src/mcp_server.py
+```
+
+Registrarlo en Claude Code: ver `.mcp.json` en la raíz (ya configurado).
+
+## Dashboard
 
 ```bash
 streamlit run app.py
