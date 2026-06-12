@@ -1,0 +1,7 @@
+{
+  "name": "evaluator_skill",
+  "description": "Agente Evaluator: audita inconsistencias, optimiza UI/UX y performance (cache) y genera un reporte de QA del dashboard.",
+  "version": "0.1.0",
+  "status": "scaffold",
+  "_todo": "Etapa 5 (feature/claude-skills): definir prompts, tools y criterios de QA."
+}

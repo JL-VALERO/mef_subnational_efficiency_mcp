@@ -1,0 +1,41 @@
+# --- Archivos locales de trabajo (NO subir) ---
+*.local.txt
+PLAN_DE_TRABAJO.local.txt
+.local/
+notes/
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# --- Entornos virtuales ---
+.venv/
+venv/
+env/
+ENV/
+
+# --- Jupyter / IDE ---
+.ipynb_checkpoints/
+.vscode/
+.idea/
+
+# --- Datos pesados (respeta regla anti-flooding) ---
+# Los CSV/JSON crudos y grandes no van al repo; solo snapshots y processed pequenos.
+data/raw_pdfs/*.pdf
+data/*.csv
+data/*.json
+*.parquet
+
+# --- Sistema operativo ---
+.DS_Store
+Thumbs.db
+
+# --- Secretos / configuracion local ---
+.env
+*.key
+secrets.*
