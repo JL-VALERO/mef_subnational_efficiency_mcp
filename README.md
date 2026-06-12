@@ -92,6 +92,31 @@ python src/mcp_server.py
 
 Registrarlo en Claude Code: ver `.mcp.json` en la raíz (ya configurado).
 
+## Pipeline de datos MEF (anti-flooding)
+
+Fuente: dataset del MEF *Presupuesto y Ejecución de Gasto – Devengado Mensual*
+(un CSV por año; el de 2025 pesa ~2.8 GB). El pipeline **nunca** lo descarga
+completo: lo transmite por chunks, lee solo las columnas necesarias, filtra por
+nivel de gobierno, agrega por entidad ejecutora y guarda solo resultados
+pequeños en `data/processed/` y `data/snapshots/`.
+
+Período **dinámico** por CLI (sin fechas hardcodeadas):
+
+```bash
+# Devengado anual 2025, gobiernos subnacionales (regional + local)
+python src/data_pipeline.py --period 2025
+
+# Devengado acumulado a junio 2025
+python src/data_pipeline.py --period 2025-06
+
+# Muestra rápida (tope de filas) para pruebas/demo
+python src/data_pipeline.py --period 2025-06 --max-rows 150000
+```
+
+Columnas clave del MEF: `MONTO_PIM` (PIM), `MONTO_DEVENGADO_<MES>`/`_ANUAL`
+(Devengado), `NIVEL_GOBIERNO` (E/R/M = Nacional/Regional/Local),
+`DEPARTAMENTO_EJECUTORA_NOMBRE`, `PLIEGO_NOMBRE`, `EJECUTORA_NOMBRE`.
+
 ## Dashboard
 
 ```bash
