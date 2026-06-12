@@ -24,11 +24,15 @@ ENV/
 .vscode/
 .idea/
 
-# --- Datos pesados (respeta regla anti-flooding) ---
-# Los CSV/JSON crudos y grandes no van al repo; solo snapshots y processed pequenos.
-data/raw_pdfs/*.pdf
-data/*.csv
-data/*.json
+# --- Datos (respeta regla anti-flooding) ---
+# Los crudos pesados y los artefactos generados en runtime NO van al repo;
+# se conservan solo los directorios (.gitkeep).
+data/raw_pdfs/*
+!data/raw_pdfs/.gitkeep
+data/snapshots/*
+!data/snapshots/.gitkeep
+data/processed/*
+!data/processed/.gitkeep
 *.parquet
 
 # --- Sistema operativo ---
