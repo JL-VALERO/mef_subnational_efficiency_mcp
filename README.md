@@ -117,6 +117,35 @@ Columnas clave del MEF: `MONTO_PIM` (PIM), `MONTO_DEVENGADO_<MES>`/`_ANUAL`
 (Devengado), `NIVEL_GOBIERNO` (E/R/M = Nacional/Regional/Local),
 `DEPARTAMENTO_EJECUTORA_NOMBRE`, `PLIEGO_NOMBRE`, `EJECUTORA_NOMBRE`.
 
+## OCR del archivo histórico 1964
+
+Documento: **"Cuenta General de la República" (1964)**, Contraloría General del
+Perú (Fuentes Históricas del Perú / Google Books, id `9YkbAQAAMAAJ`).
+
+1. Descarga el PDF (botón *Descargar PDF* en
+   https://books.google.com.pe/books?id=9YkbAQAAMAAJ ) y guárdalo como
+   `data/raw_pdfs/cuenta_general_1964.pdf` (no se versiona).
+2. Ejecuta el OCR (PaddleOCR) sobre ≥15 páginas:
+
+```bash
+# 15 páginas con tablas presupuestarias (desde la 60), GPU si está disponible
+python src/ocr_engine.py --start 60 --count 15
+
+python src/ocr_engine.py --start 60 --count 15 --cpu   # forzar CPU
+```
+
+Salida (solo resultados pequeños): `data/processed/ocr_1964/page_XXXX.txt`,
+`ocr_1964.json` y un snapshot en `data/snapshots/`.
+
+> **GPU (opcional, recomendado):** requiere Python 3.10–3.12 (paddle no tiene
+> wheels para 3.14). Combo verificado en una RTX 3050 Ti (CUDA 12):
+> ```bash
+> pip install paddlepaddle-gpu==2.6.1.post120 -f https://www.paddlepaddle.org.cn/whl/windows/mkl/avx/stable.html
+> pip install nvidia-cudnn-cu12==8.9.7.29 "numpy<2"
+> ```
+> El motor registra automáticamente las DLLs de cuDNN/cuBLAS y cae a CPU si no
+> hay GPU.
+
 ## Dashboard
 
 ```bash
