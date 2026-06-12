@@ -146,6 +146,23 @@ Salida (solo resultados pequeños): `data/processed/ocr_1964/page_XXXX.txt`,
 > El motor registra automáticamente las DLLs de cuDNN/cuBLAS y cae a CPU si no
 > hay GPU.
 
+## Motor analítico (métricas + Hall of Shame)
+
+Consume `data/processed/execution_<period>.csv` (salida del pipeline) y calcula:
+
+- **Avance (%)** y **Presupuesto Paralizado** por entidad.
+- KPIs globales (PIM, devengado, avance global, paralizado total).
+- Agregados por nivel de gobierno, departamento y sector.
+- **Hall of Shame**: entidades con PIM > 10M PEN y peor avance.
+
+```bash
+python src/analytical_engine.py --period 2025-06 --top 15
+```
+
+Salida en `data/processed/analytics_<period>/` (`kpis.json`, `by_*.csv`,
+`hall_of_shame.csv`) + snapshot. Sus funciones (`kpis`, `by_dimension`,
+`hall_of_shame`) las reutiliza el dashboard.
+
 ## Dashboard
 
 ```bash
