@@ -189,9 +189,24 @@ python src/run_skill.py evaluator_skill --period 2025-12       # auditoría QA
 
 ## Dashboard
 
+Dashboard de 4 pestañas que reutiliza el motor analítico y lee solo los
+agregados de `data/processed/` (cacheado con `st.cache_data`):
+
+1. **KPIs 2025 + 1964** — métricas de ejecución del período y análisis histórico
+   independiente del documento de 1964 (líneas por página + distribución de
+   montos detectados por OCR).
+2. **Distribución territorial** — paralizado por departamento, heatmap
+   departamento × nivel y treemap del presupuesto (tamaño = PIM, color = avance).
+3. **Hall of Shame** — entidades > 10M PEN con peor avance (umbral ajustable).
+4. **Auditoría multi-agente** — reporte de QA del Evaluator + playground
+   interactivo para filtrar el presupuesto en riesgo.
+
 ```bash
 streamlit run app.py
 ```
+
+> El selector de período toma los datos ya procesados; genera uno con
+> `python src/run_skill.py executor_skill --period 2025-06 --max-rows 150000`.
 
 > Documentación detallada de cada módulo se completará conforme avancen las etapas
 > del proyecto.

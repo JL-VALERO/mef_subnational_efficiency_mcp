@@ -6,7 +6,7 @@
 mcp>=1.0.0
 
 # --- Dashboard ---
-streamlit>=1.30.0
+streamlit>=1.40.0       # usa width="stretch" (use_container_width quedo deprecado)
 
 # --- Procesamiento de datos (regla anti-flooding: filtrado local) ---
 pandas>=2.0.0
