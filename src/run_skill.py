@@ -121,7 +121,9 @@ def _apply_optimizations() -> list[dict]:
     desired = (
         "[server]\nheadless = true\n\n"
         "[runner]\nfastReruns = true\n\n"
-        '[theme]\nbase = "light"\nprimaryColor = "#c0392b"\n'
+        '[theme]\nbase = "dark"\nprimaryColor = "#e74c3c"\n'
+        'backgroundColor = "#0e1117"\nsecondaryBackgroundColor = "#1c2333"\n'
+        'textColor = "#fafafa"\n'
     )
     if not cfg.exists() or cfg.read_text(encoding="utf-8") != desired:
         cfg.write_text(desired, encoding="utf-8")
