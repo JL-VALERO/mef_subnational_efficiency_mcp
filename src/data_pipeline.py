@@ -166,6 +166,15 @@ def process(
     usecols = DIM_COLS + ["MONTO_PIM"] + dev_cols
     levels = SCOPE_LEVELS[scope]
 
+    # Inspección de esquema previa (misma mecánica que la tool MCP inspeccionar_esquema_csv):
+    # toma un snapshot de pocas filas para mapear columnas antes de procesar.
+    schema = utils.stream_csv_head(url, 5)
+    utils.save_snapshot(
+        f"schema_{period}",
+        {"source_url": url, "header": schema["header"], "sample_rows": schema["sample_rows"]},
+    )
+    log.info("Esquema mapeado vía MCP: %d columnas detectadas.", len(schema["header"]))
+
     log.info(
         "Procesando período=%s scope=%s (niveles=%s) max_rows=%s",
         period, scope, sorted(levels), max_rows,
