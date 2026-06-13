@@ -9,6 +9,7 @@ pesa ~2.8 GB). NUNCA se descargan ni se cargan completos. En su lugar:
     - Se agrega al vuelo a nivel de entidad ejecutora.
     - Se guardan únicamente resultados pequeños:
         * data/processed/execution_<period>.csv   (agregado por entidad)
+        * data/processed/execution_<period>_by_generica.csv (gasto por genérica)
         * data/processed/execution_<period>_meta.json (metadatos del run)
         * data/snapshots/execution_<period>_sample.json (5-10 filas)
 
@@ -49,6 +50,7 @@ DIM_COLS = [
     "PLIEGO_NOMBRE",
     "EJECUTORA_NOMBRE",
     "DEPARTAMENTO_EJECUTORA_NOMBRE",
+    "GENERICA_NOMBRE",  # tipo de gasto (para el desglose del Hall of Shame, Tab 3)
 ]
 
 # Devengado acumulado por mes: columnas MONTO_DEVENGADO_<MES>.
@@ -76,6 +78,12 @@ GROUP_COLS = [
     "EJECUTORA_NOMBRE",
 ]
 
+# Segundo agregado: gasto por genérica (qué líneas de gasto están bloqueadas).
+GENERICA_GROUP = ["NIVEL_GOBIERNO_NOMBRE", "GENERICA_NOMBRE"]
+
+# Mes final de cada trimestre (devengado acumulado).
+QUARTER_END_MONTH = {1: 3, 2: 6, 3: 9, 4: 12}
+
 # Niveles de gobierno por alcance (E=Nacional, R=Regional, M=Local).
 SCOPE_LEVELS = {
     "subnational": {"R", "M"},
@@ -85,12 +93,23 @@ SCOPE_LEVELS = {
 
 
 def parse_period(period: str) -> tuple[int, int | None]:
-    """'2025' -> (2025, None); '2025-06' -> (2025, 6). Valida rangos."""
-    parts = period.strip().split("-")
+    """
+    Normaliza el período al año y mes acumulado:
+        '2025'    -> (2025, None)   año completo
+        '2025-06' -> (2025, 6)      acumulado a junio
+        '2025-Q2' -> (2025, 6)      acumulado al cierre del 2º trimestre
+    """
+    parts = period.strip().upper().split("-")
     year = int(parts[0])
     if len(parts) == 1:
         return year, None
-    month = int(parts[1])
+    token = parts[1]
+    if token.startswith("Q"):
+        quarter = int(token[1:])
+        if quarter not in QUARTER_END_MONTH:
+            raise ValueError(f"Trimestre inválido en '{period}' (use Q1-Q4).")
+        return year, QUARTER_END_MONTH[quarter]
+    month = int(token)
     if not 1 <= month <= 12:
         raise ValueError(f"Mes inválido en período '{period}' (debe ser 1-12).")
     return year, month
@@ -147,6 +166,15 @@ def process(
     usecols = DIM_COLS + ["MONTO_PIM"] + dev_cols
     levels = SCOPE_LEVELS[scope]
 
+    # Inspección de esquema previa (misma mecánica que la tool MCP inspeccionar_esquema_csv):
+    # toma un snapshot de pocas filas para mapear columnas antes de procesar.
+    schema = utils.stream_csv_head(url, 5)
+    utils.save_snapshot(
+        f"schema_{period}",
+        {"source_url": url, "header": schema["header"], "sample_rows": schema["sample_rows"]},
+    )
+    log.info("Esquema mapeado vía MCP: %d columnas detectadas.", len(schema["header"]))
+
     log.info(
         "Procesando período=%s scope=%s (niveles=%s) max_rows=%s",
         period, scope, sorted(levels), max_rows,
@@ -165,6 +193,7 @@ def process(
     )
 
     partials: list[pd.DataFrame] = []
+    partials_gen: list[pd.DataFrame] = []
     rows_read = 0
     try:
         for chunk in reader:
@@ -184,8 +213,8 @@ def process(
                 dev = dev + pd.to_numeric(chunk[col], errors="coerce").fillna(0.0)
             chunk["devengado"] = dev
 
-            agg = chunk.groupby(GROUP_COLS, dropna=False)[["pim", "devengado"]].sum()
-            partials.append(agg)
+            partials.append(chunk.groupby(GROUP_COLS, dropna=False)[["pim", "devengado"]].sum())
+            partials_gen.append(chunk.groupby(GENERICA_GROUP, dropna=False)[["pim", "devengado"]].sum())
 
             if max_rows and rows_read >= max_rows:
                 log.info("Alcanzado max_rows=%s (filas leídas=%s)", max_rows, rows_read)
@@ -218,6 +247,20 @@ def process(
     out_csv = utils.PROCESSED_DIR / f"execution_{period}.csv"
     result.to_csv(out_csv, index=False, encoding="utf-8")
 
+    # Segundo agregado: gasto por genérica (qué líneas de gasto se quedan sin ejecutar).
+    gen = (
+        pd.concat(partials_gen)
+        .groupby(level=GENERICA_GROUP, dropna=False)[["pim", "devengado"]]
+        .sum()
+        .reset_index()
+    )
+    gen.columns = ["nivel_gobierno", "generica", "pim", "devengado"]
+    gen["paralizado"] = gen["pim"] - gen["devengado"]
+    gen["period"] = period
+    gen = gen.sort_values("paralizado", ascending=False).reset_index(drop=True)
+    out_gen = utils.PROCESSED_DIR / f"execution_{period}_by_generica.csv"
+    gen.to_csv(out_gen, index=False, encoding="utf-8")
+
     meta = {
         "period": period,
         "scope": scope,
@@ -229,6 +272,7 @@ def process(
         "total_devengado": float(result["devengado"].sum()),
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "processed_csv": str(out_csv),
+        "by_generica_csv": str(out_gen),
     }
     (utils.PROCESSED_DIR / f"execution_{period}_meta.json").write_text(
         json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8"

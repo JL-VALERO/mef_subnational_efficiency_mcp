@@ -163,6 +163,86 @@ def preview_csv(url: str, rows: int = 5) -> dict:
     return snapshot
 
 
+# URL de descarga del documento histórico 1964 (Google Books, dominio público).
+GOOGLE_BOOKS_1964_PDF = (
+    "https://books.google.com/books/download/Cuenta_general.pdf?id=9YkbAQAAMAAJ&output=pdf"
+)
+
+
+@mcp.tool()
+def descargar_documento_1964(filename: str = "cuenta_general_1964.pdf") -> dict:
+    """
+    Descarga el PDF histórico de 1964 ("Cuenta General de la República") a
+    data/raw_pdfs/. Best-effort: Google Books puede exigir captcha; en ese caso
+    devuelve un aviso para descarga manual (ver README).
+    """
+    import requests
+
+    utils.RAW_PDFS_DIR.mkdir(parents=True, exist_ok=True)
+    dest = utils.RAW_PDFS_DIR / filename
+    try:
+        r = requests.get(
+            GOOGLE_BOOKS_1964_PDF,
+            headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"},
+            stream=True,
+            timeout=120,
+        )
+        if "pdf" not in r.headers.get("content-type", ""):
+            r.close()
+            return {
+                "status": "captcha",
+                "dest": str(dest),
+                "message": "Google Books exigió captcha. Descárgalo manualmente "
+                "(https://books.google.com.pe/books?id=9YkbAQAAMAAJ) y guárdalo aquí.",
+            }
+        n = 0
+        with open(dest, "wb") as f:
+            for chunk in r.iter_content(65536):
+                f.write(chunk)
+                n += len(chunk)
+        r.close()
+        log.info("descargar_documento_1964 -> %s (%d bytes)", dest, n)
+        return {"status": "ok", "dest": str(dest), "bytes": n}
+    except Exception as exc:  # noqa: BLE001
+        return {"status": "error", "message": str(exc)[:200]}
+
+
+@mcp.tool()
+def procesar_ocr_paginas_1964(start: int = 60, count: int = 15, dpi: int = 200, lang: str = "es") -> dict:
+    """
+    Dispara PaddleOCR sobre >=15 páginas del documento 1964 (envuelve
+    ocr_engine.run). Requiere el PDF en data/raw_pdfs/ y un entorno con paddle
+    (usa GPU si está disponible). Devuelve los metadatos del run.
+    """
+    import ocr_engine
+
+    return ocr_engine.run(ocr_engine.DEFAULT_PDF, start, count, dpi, lang)
+
+
+@mcp.tool()
+def descargar_y_analizar_estadisticas(period: str) -> dict:
+    """
+    Resumen estadístico pequeño de un período (KPIs + top Hall of Shame) a
+    partir del agregado en data/processed/. Lectura ligera (anti-flooding); si
+    el período no existe, indica cómo generarlo con el Executor.
+    """
+    import analytical_engine as ae
+
+    if not ae.execution_path(period).exists():
+        return {
+            "status": "missing",
+            "hint": f"Genera primero: python src/run_skill.py executor_skill --period {period}",
+        }
+    df = ae.load_execution(period)
+    shame = ae.hall_of_shame(df, top=5)
+    return {
+        "status": "ok",
+        "period": period,
+        "kpis": ae.kpis(df),
+        "hall_of_shame_top5": shame.to_dict("records"),
+    }
+
+
 if __name__ == "__main__":
     log.info("Iniciando servidor MCP 'mef-subnational-efficiency' (stdio)…")
     mcp.run()

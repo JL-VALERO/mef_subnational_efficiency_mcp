@@ -38,14 +38,17 @@ mef_subnational_efficiency_mcp/
 ├── app.py                     # Dashboard Streamlit (4 pestañas)
 ├── README.md
 ├── requirements.txt
+├── .mcp.json                  # Registro del servidor MCP para Claude Code
+├── .streamlit/config.toml     # Config de performance/tema (la genera el Evaluator)
 ├── .claude/skills/
 │   ├── executor_skill.json    # Agente Executor (ingesta, OCR, draft UI)
 │   └── evaluator_skill.json   # Agente Evaluator (QA, UI/UX, reporte)
 ├── src/
-│   ├── mcp_server.py          # Servidor MCP local
-│   ├── data_pipeline.py       # Ingesta MEF 2025 (anti-flooding)
+│   ├── mcp_server.py          # Servidor MCP local (8 tools)
+│   ├── data_pipeline.py       # Ingesta MEF (anti-flooding)
 │   ├── ocr_engine.py          # OCR PaddleOCR del archivo 1964
 │   ├── analytical_engine.py   # Métricas y Hall of Shame
+│   ├── run_skill.py           # Orquestador CLI de los skills (executor/evaluator)
 │   └── utils.py               # Helpers comunes
 ├── data/
 │   ├── raw_pdfs/              # PDF fuente 1964 (no versionado)
@@ -54,16 +57,22 @@ mef_subnational_efficiency_mcp/
 └── video/link.txt            # Link del video de presentación
 ```
 
+> **Archivos añadidos a la estructura base:** `src/run_skill.py` (orquestador que
+> mapea `claude "run <skill> for period <p>"` a la ejecución real), `.mcp.json`
+> (registro del servidor en Claude Code) y `.streamlit/config.toml` (introducido
+> por el Evaluator). El resto coincide con la estructura exacta del issue.
+
 ---
 
 ## Instalación
 
+> ⚠️ **Usa Python 3.10–3.12.** PaddlePaddle/PaddleOCR aún no publican wheels para
+> Python 3.13+; en 3.14 la instalación falla. En este proyecto se usó un entorno
+> conda `geo` (Python 3.10).
+
 ```bash
-python -m venv .venv
-# Windows
-.venv\Scripts\activate
-# Linux/Mac
-source .venv/bin/activate
+conda create -n geo python=3.10 -y && conda activate geo   # recomendado
+# o un venv con Python 3.10-3.12:  python3.10 -m venv .venv
 
 pip install -r requirements.txt
 ```
@@ -81,8 +90,21 @@ catálogos reducidos y snapshots de pocas filas (regla anti-flooding):
 | `health_check` | Verifica que el servidor está vivo. |
 | `search_datasets(query, limit)` | Busca datasets por palabra clave (tolerante a acentos). |
 | `get_dataset_info(dataset_id)` | Metadatos + recursos (id, formato, URL, datastore). |
-| `preview_resource(resource_id, rows)` | Muestra filas de un recurso del datastore (máx 10). |
-| `preview_csv(url, rows)` | Muestra las primeras filas de un CSV remoto sin descargarlo entero. |
+| `preview_resource(resource_id, rows)` | Muestra filas de un recurso del datastore (≈ `consultar_datastore_filtrado`, máx 10). |
+| `preview_csv(url, rows)` | Primeras filas de un CSV remoto sin descargarlo (≈ `inspeccionar_esquema_csv`). |
+| `descargar_documento_1964(filename)` | Descarga el PDF histórico de 1964 a `data/raw_pdfs/`. |
+| `procesar_ocr_paginas_1964(start, count)` | Dispara PaddleOCR sobre ≥15 páginas del 1964. |
+| `descargar_y_analizar_estadisticas(period)` | Resumen pequeño (KPIs + top Hall of Shame) del período. |
+
+**Criterio de las 8 tools** (no más): se separó por *responsabilidad* —
+descubrimiento (`search`/`info`), inspección sin flooding (`preview_*`), e
+ingesta/cómputo del flujo histórico (`descargar_1964`/`ocr`/`estadísticas`).
+Se omitieron tools redundantes para mantener el contexto liviano.
+
+> **Nota CKAN→DKAN:** el issue asume CKAN (`/api/3/action/package_search`), pero
+> el portal real es **DKAN** y ese endpoint da 404. La búsqueda se implementó con
+> `package_list` + filtro y `package_show` (que devuelve el paquete envuelto en
+> lista). Por eso `search_datasets` no usa `package_search`.
 
 Ejecutar el servidor (stdio):
 
@@ -167,24 +189,27 @@ Salida en `data/processed/analytics_<period>/` (`kpis.json`, `by_*.csv`,
 
 Dos skills en `.claude/skills/` orquestados por `src/run_skill.py`:
 
-- **executor_skill** — refresca el análisis de un período: ingesta MEF →
-  métricas → (opcional) OCR 1964 → dashboard.
-- **evaluator_skill** — audita la consistencia de los resultados y genera un
-  reporte de QA (`data/processed/qa_report_<period>.json`).
+- **executor_skill** — refresca el análisis de un período: ingesta MEF (`--scope
+  all`) → métricas → (opcional) OCR 1964 → dashboard.
+- **evaluator_skill** — audita consistencia, **cross-verifica vía MCP** (re-muestrea
+  el origen para detectar *extraction drift*), **modifica código** (genera
+  `.streamlit/config.toml`, verifica cache/guardas) y emite un reporte
+  **markdown** (`qa_report_<period>.md`) además del JSON.
 
-El período es **dinámico** (sin fechas hardcodeadas). El comando de Claude Code:
+El período es **dinámico** (sin fechas hardcodeadas), admite año, año-mes y
+**trimestre** (`2025`, `2025-06`, `2025-Q4`). El comando de Claude Code:
 
 ```text
-claude "run executor_skill for period 2025-12"
+claude "run executor_skill for period 2025-Q4"
 ```
 
 equivale a:
 
 ```bash
-python src/run_skill.py executor_skill --period 2025-12        # ingesta + análisis
-python src/run_skill.py executor_skill --period 2025-12 --with-ocr   # incluye OCR
-python src/run_skill.py executor_skill --period 2025-12 --dry-run    # solo muestra los comandos
-python src/run_skill.py evaluator_skill --period 2025-12       # auditoría QA
+python src/run_skill.py executor_skill --period 2025-Q4        # ingesta + análisis
+python src/run_skill.py executor_skill --period 2025-Q4 --with-ocr   # incluye OCR
+python src/run_skill.py executor_skill --period 2025-Q4 --dry-run    # solo muestra los comandos
+python src/run_skill.py evaluator_skill --period 2025-Q4       # auditoría QA + markdown
 ```
 
 ## Dashboard
@@ -192,21 +217,19 @@ python src/run_skill.py evaluator_skill --period 2025-12       # auditoría QA
 Dashboard de 4 pestañas que reutiliza el motor analítico y lee solo los
 agregados de `data/processed/` (cacheado con `st.cache_data`):
 
-1. **KPIs 2025 + 1964** — métricas de ejecución del período y análisis histórico
-   independiente del documento de 1964 (líneas por página + distribución de
-   montos detectados por OCR).
+1. **KPIs 2025 + 1964** — métricas de ejecución, **narrativa AI Advisor**, y
+   análisis histórico **independiente** del 1964 (líneas/página, montos
+   detectados, categorías estructurales y **conclusiones de texto**).
 2. **Distribución territorial** — paralizado por departamento, heatmap
    departamento × nivel y treemap del presupuesto (tamaño = PIM, color = avance).
-3. **Hall of Shame** — entidades > 10M PEN con peor avance (umbral ajustable).
-4. **Auditoría multi-agente** — reporte de QA del Evaluator + playground
-   interactivo para filtrar el presupuesto en riesgo.
+3. **Hall of Shame** — entidades > 10M PEN con peor avance (umbral ajustable) y
+   **desglose del gasto bloqueado por genérica** (infraestructura, bienes…).
+4. **Auditoría multi-agente** — reporte **markdown** del Evaluator (checks,
+   cross-verificación, optimizaciones) + playground interactivo.
 
 ```bash
 streamlit run app.py
 ```
 
 > El selector de período toma los datos ya procesados; genera uno con
-> `python src/run_skill.py executor_skill --period 2025-06 --max-rows 150000`.
-
-> Documentación detallada de cada módulo se completará conforme avancen las etapas
-> del proyecto.
+> `python src/run_skill.py executor_skill --period 2025-Q2 --max-rows 150000`.

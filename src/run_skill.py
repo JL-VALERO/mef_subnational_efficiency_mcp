@@ -34,7 +34,7 @@ import analytical_engine  # noqa: E402
 log = utils.get_logger("mef_mcp.skills")
 
 SKILLS_DIR = utils.PROJECT_ROOT / ".claude" / "skills"
-PERIOD_RE = re.compile(r"^\d{4}(-\d{2})?$")
+PERIOD_RE = re.compile(r"^\d{4}(-(\d{2}|Q[1-4]))?$", re.IGNORECASE)
 
 
 def load_skill(name: str) -> dict:
@@ -86,6 +86,115 @@ def run_executor(skill: dict, period: str, max_rows: int | None, with_ocr: bool,
     return meta
 
 
+def _cross_verify_via_mcp(period: str) -> dict:
+    """
+    Re-muestrea independientemente el CSV de origen usando la tool MCP preview_csv
+    y verifica que las columnas clave existen (detección de 'extraction drift').
+    """
+    try:
+        import data_pipeline as dp
+        import mcp_server
+
+        year, _ = dp.parse_period(period)
+        url = dp.resolve_resource_url(year)
+        sample = mcp_server.preview_csv(url, rows=3)
+        header = sample.get("header", [])
+        missing = [c for c in ["MONTO_PIM"] if c not in header]
+        if not any(h.startswith("MONTO_DEVENGADO_") for h in header):
+            missing.append("MONTO_DEVENGADO_*")
+        return {"source_url": url, "columns_checked": len(header), "missing": missing, "drift": bool(missing)}
+    except Exception as exc:  # noqa: BLE001
+        return {"error": str(exc)[:200], "drift": None}
+
+
+def _apply_optimizations() -> list[dict]:
+    """
+    Aplica/asegura optimizaciones reales sobre el código del dashboard
+    (no solo recomendaciones): crea .streamlit/config.toml y verifica
+    estáticamente cache y guarda de división por cero en app.py.
+    """
+    actions: list[dict] = []
+
+    cfg_dir = utils.PROJECT_ROOT / ".streamlit"
+    cfg_dir.mkdir(exist_ok=True)
+    cfg = cfg_dir / "config.toml"
+    desired = (
+        "[server]\nheadless = true\n\n"
+        "[runner]\nfastReruns = true\n\n"
+        '[theme]\nbase = "light"\nprimaryColor = "#c0392b"\n'
+    )
+    if not cfg.exists() or cfg.read_text(encoding="utf-8") != desired:
+        cfg.write_text(desired, encoding="utf-8")
+        actions.append({"change": "config", "detail": "Generado/actualizado .streamlit/config.toml (performance + tema)."})
+    else:
+        actions.append({"change": "config", "detail": ".streamlit/config.toml ya óptimo (sin cambios)."})
+
+    app_text = (utils.PROJECT_ROOT / "app.py").read_text(encoding="utf-8")
+    actions.append({
+        "change": "cache_check",
+        "detail": "@st.cache_data presente en app.py." if "@st.cache_data" in app_text
+        else "FALTA @st.cache_data en app.py (rendimiento degradado).",
+        "ok": "@st.cache_data" in app_text,
+    })
+
+    # La guarda de división por cero del avance vive en el motor analítico.
+    ae_text = (utils.PROJECT_ROOT / "src" / "analytical_engine.py").read_text(encoding="utf-8")
+    has_guard = '["pim"] > 0' in ae_text
+    actions.append({
+        "change": "div_zero_check",
+        "detail": "Guarda de división por cero presente en analytical_engine (pim > 0)." if has_guard
+        else "Revisar manejo de división por cero en cálculos de avance.",
+        "ok": has_guard,
+    })
+    return actions
+
+
+def _write_markdown_report(report: dict, crosscheck: dict, actions: list[dict]) -> Path:
+    """Escribe el reporte de QA en markdown (mostrado en el Tab 4 del dashboard)."""
+    period = report["period"]
+    lines = [
+        f"# Reporte de Auditoría — Evaluator ({period})",
+        "",
+        f"_Generado: {report['evaluated_at']} · Entidades auditadas: {report['entities_audited']}_",
+        "",
+        f"**Veredicto global:** {'✅ Todos los checks pasaron' if report['all_passed'] else '❌ Hay violaciones'}",
+        "",
+        "## 1. Checks de consistencia de datos",
+        "",
+        "| Check | Violaciones | Estado |",
+        "|---|---|---|",
+    ]
+    for c in report["checks"]:
+        lines.append(f"| {c['id']} | {c['violations']} | {'✅' if c['passed'] else '❌'} |")
+    lines += [
+        "",
+        "## 2. Cross-verificación independiente (vía MCP)",
+        "",
+        f"- Fuente re-muestreada: `{crosscheck.get('source_url', 'n/d')}`",
+        f"- Columnas verificadas: {crosscheck.get('columns_checked', 'n/d')}",
+        f"- Extraction drift: {'❌ ' + ', '.join(crosscheck['missing']) if crosscheck.get('drift') else '✅ sin drift'}",
+        "",
+        "## 3. Optimizaciones de performance/UX aplicadas",
+        "",
+    ]
+    for a in actions:
+        lines.append(f"- **{a['change']}**: {a['detail']}")
+    lines += [
+        "",
+        "## 4. Recomendaciones (Executor draft → Evaluator polish)",
+        "",
+        "**UI/UX**",
+    ]
+    lines += [f"- {r}" for r in report.get("ui_ux_recommendations", [])]
+    lines += ["", "**Performance**"]
+    lines += [f"- {r}" for r in report.get("performance_recommendations", [])]
+    lines.append("")
+
+    path = utils.PROCESSED_DIR / f"qa_report_{period}.md"
+    path.write_text("\n".join(lines), encoding="utf-8")
+    return path
+
+
 def run_evaluator(skill: dict, period: str) -> dict:
     """Audita la consistencia de los resultados del período y escribe el QA report."""
     df = analytical_engine.load_execution(period)  # incluye avance_pct y paralizado
@@ -107,6 +216,9 @@ def run_evaluator(skill: dict, period: str) -> dict:
     for c in checks:
         c["passed"] = c["violations"] == 0
 
+    crosscheck = _cross_verify_via_mcp(period)
+    actions = _apply_optimizations()
+
     report = {
         "skill": "evaluator_skill",
         "period": period,
@@ -114,6 +226,8 @@ def run_evaluator(skill: dict, period: str) -> dict:
         "entities_audited": int(len(df)),
         "checks": checks,
         "all_passed": all(c["passed"] for c in checks),
+        "cross_verification": crosscheck,
+        "optimizations_applied": actions,
         "ui_ux_recommendations": skill.get("ui_ux_recommendations", []),
         "performance_recommendations": skill.get("performance_recommendations", []),
     }
@@ -121,12 +235,14 @@ def run_evaluator(skill: dict, period: str) -> dict:
     utils.PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
     out = utils.PROCESSED_DIR / f"qa_report_{period}.json"
     out.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+    md_path = _write_markdown_report(report, crosscheck, actions)
     utils.save_snapshot(f"qa_report_{period}", report)
     log.info(
-        "Evaluator %s: %d entidades, checks OK=%s -> %s",
-        period, report["entities_audited"], report["all_passed"], out,
+        "Evaluator %s: %d entidades, checks OK=%s, drift=%s -> %s",
+        period, report["entities_audited"], report["all_passed"], crosscheck.get("drift"), md_path,
     )
     report["report_path"] = str(out)
+    report["report_markdown"] = str(md_path)
     return report
 
 

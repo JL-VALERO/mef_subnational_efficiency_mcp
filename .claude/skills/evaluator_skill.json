@@ -31,7 +31,14 @@
     "Leer solo los CSV agregados de data/processed/, nunca los crudos del MEF.",
     "Precalcular agregados por dimensión en el motor analítico (no en el render)."
   ],
+  "cross_verification": "Re-muestrea el CSV de origen vía la tool MCP preview_csv y verifica que las columnas clave (MONTO_PIM, MONTO_DEVENGADO_*) existan, detectando extraction drift.",
+  "code_actions": [
+    "Genera/asegura .streamlit/config.toml (performance + tema).",
+    "Verifica estáticamente la presencia de @st.cache_data en app.py.",
+    "Verifica la guarda de división por cero en los cálculos de avance."
+  ],
   "output_report": "data/processed/qa_report_<period>.json",
+  "output_report_markdown": "data/processed/qa_report_<period>.md",
   "cli_example": "claude \"run evaluator_skill for period 2025-12\"",
   "cli_equivalent": "python src/run_skill.py evaluator_skill --period 2025-12"
 }

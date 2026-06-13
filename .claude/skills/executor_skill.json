@@ -17,7 +17,7 @@
       "id": "ingest",
       "module": "data_pipeline",
       "description": "Descarga en streaming el CSV anual del MEF y agrega por entidad subnacional (regla anti-flooding).",
-      "command": "{python} src/data_pipeline.py --period {period} --scope subnational",
+      "command": "{python} src/data_pipeline.py --period {period} --scope all",
       "accepts_max_rows": true,
       "auto_run": true
     },

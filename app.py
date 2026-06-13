@@ -36,7 +36,10 @@ def available_periods() -> list[str]:
     """Períodos con datos procesados (data/processed/execution_<period>.csv)."""
     periods = []
     for p in utils.PROCESSED_DIR.glob("execution_*.csv"):
-        periods.append(p.stem.replace("execution_", ""))
+        stem = p.stem.replace("execution_", "")
+        if stem.endswith("_by_generica"):  # agregado secundario, no es un período
+            continue
+        periods.append(stem)
     return sorted(periods, reverse=True)
 
 
@@ -49,6 +52,18 @@ def load_period(period: str) -> pd.DataFrame:
 def load_qa(period: str) -> dict | None:
     path = utils.PROCESSED_DIR / f"qa_report_{period}.json"
     return json.loads(path.read_text(encoding="utf-8")) if path.exists() else None
+
+
+@st.cache_data(show_spinner=False)
+def load_qa_markdown(period: str) -> str | None:
+    path = utils.PROCESSED_DIR / f"qa_report_{period}.md"
+    return path.read_text(encoding="utf-8") if path.exists() else None
+
+
+@st.cache_data(show_spinner=False)
+def load_by_generica(period: str) -> pd.DataFrame | None:
+    path = utils.PROCESSED_DIR / f"execution_{period}_by_generica.csv"
+    return pd.read_csv(path) if path.exists() else None
 
 
 @st.cache_data(show_spinner=False)
@@ -73,6 +88,85 @@ def parse_amount(token: str) -> float | None:
         return float(token.replace("'", "").replace(",", ""))
     except ValueError:
         return None
+
+
+# Departamentos del Perú y términos estructurales para el análisis del 1964.
+PERU_DEPARTMENTS = [
+    "AMAZONAS", "ANCASH", "APURIMAC", "AREQUIPA", "AYACUCHO", "CAJAMARCA", "CALLAO",
+    "CUSCO", "HUANCAVELICA", "HUANUCO", "ICA", "JUNIN", "LA LIBERTAD", "LAMBAYEQUE",
+    "LIMA", "LORETO", "MADRE DE DIOS", "MOQUEGUA", "PASCO", "PIURA", "PUNO",
+    "SAN MARTIN", "TACNA", "TUMBES", "UCAYALI",
+]
+KEYWORDS_1964 = {
+    "Egresos": "egreso", "Ingresos": "ingreso", "Balance": "balance",
+    "Presupuesto": "presupuest", "Ministerio": "ministerio", "Deuda": "deuda",
+}
+
+
+def _ocr_blob(ocr: list) -> str:
+    """Texto OCR concatenado y normalizado (sin acentos, minúsculas)."""
+    return utils.fold(" ".join(l["text"] for p in ocr for l in p["lines"]))
+
+
+def keyword_counts_1964(ocr: list) -> dict:
+    blob = _ocr_blob(ocr)
+    return {label: blob.count(token) for label, token in KEYWORDS_1964.items()}
+
+
+def departments_in_1964(ocr: list) -> list[str]:
+    blob = _ocr_blob(ocr)
+    return [d for d in PERU_DEPARTMENTS if utils.fold(d) in blob]
+
+
+def advisor_narrative(df: pd.DataFrame, summary: dict, period: str) -> str:
+    """Narrativa determinista (AI Advisor) sobre los cuellos de botella 2025."""
+    sect = ae.by_dimension(df, "sector").sort_values("paralizado", ascending=False)
+    niv = ae.by_dimension(df, "nivel_gobierno").sort_values("avance_pct")
+    parts = [
+        f"**Avance global {summary['avance_global_pct']:.1f}%** en {period}: se devengaron "
+        f"{fmt_m(summary['total_devengado'])} de {fmt_m(summary['total_pim'])}, dejando "
+        f"**{fmt_m(summary['paralizado_total'])} sin ejecutar**."
+    ]
+    if len(niv):
+        parts.append(
+            f"El nivel de gobierno con menor avance es **{niv.iloc[0]['nivel_gobierno']}** "
+            f"({niv.iloc[0]['avance_pct']:.1f}%)."
+        )
+    if len(sect):
+        parts.append(
+            f"El mayor monto detenido se concentra en **{sect.iloc[0]['sector']}** "
+            f"({fmt_m(sect.iloc[0]['paralizado'])})."
+        )
+    parts.append("Esto evidencia cuellos de botella en la capacidad de ejecución del gasto.")
+    return " ".join(parts)
+
+
+def conclusions_1964(ocr: list, amounts: list) -> str:
+    """Conclusiones de texto del documento histórico (independientes de 2025)."""
+    pages = len(ocr)
+    lines = sum(p["n_lines"] for p in ocr)
+    kw = keyword_counts_1964(ocr)
+    deps = departments_in_1964(ocr)
+    largest = max(amounts) if amounts else 0
+    bullets = [
+        f"Se digitalizaron **{pages} páginas** ({lines:,} líneas) de la *Cuenta General de "
+        f"la República de 1964* (Ministerio de Hacienda y Comercio).",
+        f"Las líneas OCR contienen **{len(amounts)} cifras monetarias**; la mayor detectada "
+        f"es **{largest:,.2f}** soles de la época.",
+        f"Predominan términos de **egresos** ({kw.get('Egresos', 0)}) e **ingresos** "
+        f"({kw.get('Ingresos', 0)}), propios de un balance presupuestal de la época.",
+    ]
+    if deps:
+        shown = ", ".join(d.title() for d in deps[:8])
+        bullets.append(
+            f"El parser identificó **{len(deps)} departamentos** mencionados: {shown}"
+            f"{'…' if len(deps) > 8 else ''}."
+        )
+    bullets.append(
+        "Como registro **independiente**, refleja la estructura de la contabilidad pública "
+        "peruana de 1964, presentada sin comparación con cifras modernas."
+    )
+    return "\n\n".join(f"- {b}" for b in bullets)
 
 
 # --------------------------------------------------------------------------- #
@@ -122,6 +216,9 @@ with tab1:
     )
     st.plotly_chart(fig, width="stretch")
 
+    st.markdown("##### 🧠 AI Advisor — lectura de cuellos de botella 2025")
+    st.info(advisor_narrative(df, summary, period))
+
     st.divider()
     st.subheader("🏛️ Análisis histórico independiente — Cuenta General 1964")
     ocr = load_ocr_1964()
@@ -163,10 +260,26 @@ with tab1:
             else:
                 st.info("No se detectaron montos numéricos en las páginas OCR.")
 
-        if amounts:
-            top_amt = pd.DataFrame({"monto": sorted(amounts, reverse=True)[:10]})
-            st.caption("Top 10 mayores montos detectados en el documento de 1964 (soles de la época):")
-            st.dataframe(top_amt.style.format({"monto": "{:,.2f}"}), width="stretch", hide_index=True)
+        # Tercer gráfico: categorías estructurales (egresos/ingresos/balance...).
+        kw = keyword_counts_1964(ocr)
+        kw_df = pd.DataFrame({"categoria": list(kw.keys()), "menciones": list(kw.values())})
+        g3, g4 = st.columns([2, 1])
+        with g3:
+            fig_kw = px.bar(
+                kw_df.sort_values("menciones", ascending=False),
+                x="categoria", y="menciones",
+                title="Categorías estructurales detectadas en el texto (1964)",
+                labels={"categoria": "", "menciones": "Líneas con el término"},
+            )
+            st.plotly_chart(fig_kw, width="stretch")
+        with g4:
+            if amounts:
+                top_amt = pd.DataFrame({"monto": sorted(amounts, reverse=True)[:10]})
+                st.caption("Top 10 montos (soles de 1964):")
+                st.dataframe(top_amt.style.format({"monto": "{:,.2f}"}), width="stretch", hide_index=True)
+
+        st.markdown("##### 📜 Conclusiones del registro histórico (independientes)")
+        st.markdown(conclusions_1964(ocr, amounts))
 
 # --------------------------------------------------------------------------- #
 # Pestaña 2 — Distribución territorial 2025
@@ -238,6 +351,29 @@ with tab3:
         show["avance_pct"] = show["avance_pct"].map(lambda v: f"{v:.1f}%")
         st.dataframe(show, width="stretch", hide_index=True)
 
+    st.divider()
+    st.subheader("🧱 ¿Qué líneas de gasto están bloqueadas?")
+    gen = load_by_generica(period)
+    if gen is None or gen.empty:
+        st.info("No hay desglose por genérica para este período (regenera con el Executor).")
+    else:
+        gen_tot = (
+            gen.groupby("generica", dropna=False)[["pim", "devengado", "paralizado"]]
+            .sum().reset_index().sort_values("paralizado", ascending=False)
+        )
+        fig_gen = px.bar(
+            gen_tot.head(12).sort_values("paralizado"),
+            x="paralizado", y="generica", orientation="h",
+            title="Presupuesto paralizado por tipo de gasto (genérica)",
+            labels={"paralizado": "Paralizado (PEN)", "generica": ""},
+        )
+        fig_gen.update_layout(height=450)
+        st.plotly_chart(fig_gen, width="stretch")
+        st.caption(
+            "Las líneas de mayor monto detenido (p. ej. adquisición de activos no "
+            "financieros = infraestructura/maquinaria) revelan dónde se traba la inversión."
+        )
+
 # --------------------------------------------------------------------------- #
 # Pestaña 4 — Auditoría multi-agente + playground
 # --------------------------------------------------------------------------- #
@@ -259,6 +395,11 @@ with tab4:
         st.dataframe(
             checks[["id", "violations", "estado"]], width="stretch", hide_index=True
         )
+
+        qa_md = load_qa_markdown(period)
+        if qa_md:
+            with st.expander("📄 Reporte completo del Evaluator (Executor draft → producto pulido)", expanded=False):
+                st.markdown(qa_md)
         with st.expander("Recomendaciones del Evaluator (UI/UX y performance)"):
             st.markdown("**UI/UX**")
             for r in qa.get("ui_ux_recommendations", []):
