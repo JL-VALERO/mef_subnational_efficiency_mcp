@@ -1,7 +1,37 @@
 {
   "name": "evaluator_skill",
-  "description": "Agente Evaluator: audita inconsistencias, optimiza UI/UX y performance (cache) y genera un reporte de QA del dashboard.",
-  "version": "0.1.0",
-  "status": "scaffold",
-  "_todo": "Etapa 5 (feature/claude-skills): definir prompts, tools y criterios de QA."
+  "role": "evaluator",
+  "version": "1.0.0",
+  "description": "Agente Evaluator: audita la consistencia de los resultados de un período, revisa UI/UX y performance del dashboard, y genera un reporte de QA.",
+  "parameters": {
+    "period": {
+      "type": "string",
+      "required": true,
+      "pattern": "^\\d{4}(-\\d{2})?$",
+      "description": "Período a auditar (debe haber sido procesado antes por el Executor).",
+      "example": "2025-12"
+    }
+  },
+  "data_quality_checks": [
+    {"id": "pim_no_negativo", "description": "Ninguna entidad debe tener PIM negativo.", "rule": "pim >= 0"},
+    {"id": "devengado_no_negativo", "description": "El devengado no puede ser negativo.", "rule": "devengado >= 0"},
+    {"id": "devengado_no_excede_pim", "description": "El devengado no debería superar el PIM.", "rule": "devengado <= pim * 1.001"},
+    {"id": "avance_en_rango", "description": "El avance debe estar entre 0 y 100%.", "rule": "0 <= avance_pct <= 100"},
+    {"id": "paralizado_consistente", "description": "paralizado debe ser igual a PIM - devengado.", "rule": "abs(paralizado - (pim - devengado)) < 1"},
+    {"id": "hall_of_shame_umbral", "description": "Todas las unidades del Hall of Shame superan el umbral de PIM.", "rule": "pim > min_pim"}
+  ],
+  "ui_ux_recommendations": [
+    "Formatear montos en millones de PEN con separador de miles.",
+    "Usar semáforo de color para el avance (rojo < 40%, ámbar 40-70%, verde > 70%).",
+    "Ordenar el Hall of Shame por avance ascendente y resaltar el top.",
+    "Incluir tooltips que expliquen PIM, Devengado, Avance y Paralizado."
+  ],
+  "performance_recommendations": [
+    "Cachear la carga de datos con st.cache_data para evitar relecturas.",
+    "Leer solo los CSV agregados de data/processed/, nunca los crudos del MEF.",
+    "Precalcular agregados por dimensión en el motor analítico (no en el render)."
+  ],
+  "output_report": "data/processed/qa_report_<period>.json",
+  "cli_example": "claude \"run evaluator_skill for period 2025-12\"",
+  "cli_equivalent": "python src/run_skill.py evaluator_skill --period 2025-12"
 }

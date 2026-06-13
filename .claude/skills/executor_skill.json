@@ -1,7 +1,52 @@
 {
   "name": "executor_skill",
-  "description": "Agente Executor: ingesta datos MEF 2025, ejecuta OCR del archivo 1964 (>=15 paginas) y genera el draft del dashboard Streamlit. Periodo dinamico via CLI.",
-  "version": "0.1.0",
-  "status": "scaffold",
-  "_todo": "Etapa 5 (feature/claude-skills): definir prompts, tools e inputs (period)."
+  "role": "executor",
+  "version": "1.0.0",
+  "description": "Agente Executor: refresca el análisis para un período dado. Ingesta los datos del MEF (anti-flooding), calcula métricas, ejecuta OCR del archivo 1964 (>=15 páginas) y deja el dashboard Streamlit listo.",
+  "parameters": {
+    "period": {
+      "type": "string",
+      "required": true,
+      "pattern": "^\\d{4}(-\\d{2})?$",
+      "description": "Período dinámico: año (2025) o año-mes (2025-12). Nada hardcodeado.",
+      "example": "2025-12"
+    }
+  },
+  "steps": [
+    {
+      "id": "ingest",
+      "module": "data_pipeline",
+      "description": "Descarga en streaming el CSV anual del MEF y agrega por entidad subnacional (regla anti-flooding).",
+      "command": "{python} src/data_pipeline.py --period {period} --scope subnational",
+      "accepts_max_rows": true,
+      "auto_run": true
+    },
+    {
+      "id": "analyze",
+      "module": "analytical_engine",
+      "description": "Calcula Avance %, Presupuesto Paralizado, KPIs y Hall of Shame.",
+      "command": "{python} src/analytical_engine.py --period {period}",
+      "auto_run": true
+    },
+    {
+      "id": "ocr_1964",
+      "module": "ocr_engine",
+      "description": "Digitaliza >=15 páginas del archivo histórico 1964 con PaddleOCR (requiere entorno con paddle y el PDF en data/raw_pdfs/).",
+      "command": "{python} src/ocr_engine.py --start 60 --count 15",
+      "auto_run": false
+    },
+    {
+      "id": "dashboard",
+      "description": "Lanza el dashboard Streamlit de 4 pestañas (paso interactivo).",
+      "command": "{python} -m streamlit run app.py",
+      "auto_run": false
+    }
+  ],
+  "outputs": [
+    "data/processed/execution_<period>.csv",
+    "data/processed/analytics_<period>/",
+    "data/processed/ocr_1964/"
+  ],
+  "cli_example": "claude \"run executor_skill for period 2025-12\"",
+  "cli_equivalent": "python src/run_skill.py executor_skill --period 2025-12"
 }
