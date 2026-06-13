@@ -163,6 +163,30 @@ Salida en `data/processed/analytics_<period>/` (`kpis.json`, `by_*.csv`,
 `hall_of_shame.csv`) + snapshot. Sus funciones (`kpis`, `by_dimension`,
 `hall_of_shame`) las reutiliza el dashboard.
 
+## Skills duales y CLI dinámico por período
+
+Dos skills en `.claude/skills/` orquestados por `src/run_skill.py`:
+
+- **executor_skill** — refresca el análisis de un período: ingesta MEF →
+  métricas → (opcional) OCR 1964 → dashboard.
+- **evaluator_skill** — audita la consistencia de los resultados y genera un
+  reporte de QA (`data/processed/qa_report_<period>.json`).
+
+El período es **dinámico** (sin fechas hardcodeadas). El comando de Claude Code:
+
+```text
+claude "run executor_skill for period 2025-12"
+```
+
+equivale a:
+
+```bash
+python src/run_skill.py executor_skill --period 2025-12        # ingesta + análisis
+python src/run_skill.py executor_skill --period 2025-12 --with-ocr   # incluye OCR
+python src/run_skill.py executor_skill --period 2025-12 --dry-run    # solo muestra los comandos
+python src/run_skill.py evaluator_skill --period 2025-12       # auditoría QA
+```
+
 ## Dashboard
 
 ```bash
