@@ -3,6 +3,7 @@
 PLAN_DE_TRABAJO.local.txt
 .local/
 notes/
+*.lnk
 
 # --- Python ---
 __pycache__/
